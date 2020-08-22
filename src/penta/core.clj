@@ -6,17 +6,24 @@
 (def organism-colors
   [:yellow :red :blue :brown :green :purple :gray])
 
+(defn zero-dec
+  [n]
+  (let [lower (dec n)]
+    (if (< lower 0)
+      0
+      lower)))
+
 (defn circle
   [[x y radius color]]
   [:circle {:cx x :cy y :r radius :fill color}])
 
 (defn circle-index
-  [[x-axis y-axis] [x-offset y-offset] radius color index]
-  (let [x (+ x-offset (* x-axis index radius 2))
-        y (+ y-offset (* y-axis index radius 2))]
-    (circle [x y radius color])))
+  [[x-axis y-axis] [x-offset y-offset] radius buffer color index]
+  (let [x (+ x-offset (* x-axis index radius buffer))
+        y (+ y-offset (* y-axis index radius buffer))]
+    [x y radius color]))
 
-(defn axis
+(defn radial-axis
   [symmetry index]
   (let [ratio (/ index symmetry)
         unit (* ratio tau)
@@ -25,32 +32,60 @@
     [x-axis y-axis]))
 
 (defn beam
-  [radius colors axis next]
+  [radius buffer colors axis]
   (let [rings (count colors)
-        offset (* rings radius 2)]
+        offset (* rings radius buffer)]
     (map
-     (partial circle-index axis [offset offset] radius)
+     (partial circle-index axis [offset offset] radius buffer)
      colors
      (range (count colors)))))
 
-(defn beams
-  [symmetry radius colors]
-  (let [axes (map (partial axis symmetry) (range symmetry))
-        next-axes (drop 1 (cycle axes))]
-    (mapcat
-     (partial beam radius colors)
-     axes
-     next-axes)))
+(defn find-beams
+  [symmetry radius buffer colors]
+  (let [axes (map
+              (partial radial-axis symmetry)
+              (range symmetry))]
+    (map
+     (partial beam radius buffer colors)
+     axes)))
+
+(defn linear-ring
+  [[start-x start-y radius color] [end-x end-y] between]
+  (let [total (inc between)
+        spaces (drop 1 (range total))]
+    (map
+     (fn [space]
+       (let [ratio (/ space total)
+             inverse (- 1 ratio)]
+         [(+ (* start-x ratio) (* end-x inverse))
+          (+ (* start-y ratio) (* end-y inverse))
+          radius
+          color]))
+     spaces)))
+
+(defn linear-rings
+  [start-beam end-beam]
+  (let [between (map zero-dec (range (count start-beam)))]
+    (concat
+     start-beam
+     (mapcat linear-ring start-beam end-beam between))))
+
+(defn find-rings
+  [symmetry radius buffer colors]
+  (let [beams (find-beams symmetry radius buffer colors)
+        next-beams (drop 1 (cycle beams))
+        rings (mapcat linear-rings beams next-beams)]
+    (map circle rings)))
 
 (defn layout
-  [symmetry radius colors]
-  (let [field (* 4 radius (count colors))]
+  [symmetry radius buffer colors]
+  (let [field (* 2 radius buffer (count colors))]
     [:svg {:width field :height field}
-     [:g (beams symmetry radius colors)]]))
+     [:g (find-rings symmetry radius buffer colors)]]))
 
 (defn render
-  [symmetry radius colors path]
-  (let [radiate (layout symmetry radius colors)
+  [symmetry radius buffer colors path]
+  (let [radiate (layout symmetry radius buffer colors)
         out (up/html radiate)]
     (spit path out)))
 
